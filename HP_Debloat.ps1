@@ -1,117 +1,107 @@
 # =========================================================================
-#  Unified HP Bloatware, Analytics & Services Removal Script
+#  Targeted Custom HP Bloatware, Tasks & Service Destruction Script
 # =========================================================================
 
-# 1. STOP & DISABLE HP BACKGROUND SERVICES & ANALYTICS (Your list + extras)
+# 1. STOP & DISABLE HP BACKGROUND SERVICES (Including newly discovered network switchers)
 $HPServices = @(
-    "HpTouchpointAnalyticsService", 
-    "hpsvcsscan", 
-    "HPAudioAnalytics", 
-    "HPNetworkCap", 
-    "HPDiagsCap", 
-    "HPSysInfoCap", 
-    "HPAppHelperCap",
-    "HPNetworkOptimizer"
+    "HpTouchpointAnalyticsService", "hpsvcsscan", "HPAudioAnalytics", 
+    "HPNetworkCap", "HPDiagsCap", "HPSysInfoCap", "HPAppHelperCap",
+    "HPNetworkOptimizer", "SecurityUpdateService", 
+    "LanWlanWwanSwitchingServiceUWP", "HP Comm Recover"
 )
 
-Write-Host "`n--- Processing HP Services and Analytics ---" -ForegroundColor Cyan
+Write-Host "`n--- Stopping and Disabling Active HP Services ---" -ForegroundColor Cyan
+# Clear active processes running from targeted directories
+Get-Process | Where-Object { $_.Name -like "*HP*" -or $_.Name -like "*Wolf*" -or $_.Name -like "*LanWlan*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+
 foreach ($Service in $HPServices) {
     if (Get-Service -Name $Service -ErrorAction SilentlyContinue) {
         try {
             Stop-Service -Name $Service -Force -ErrorAction Stop
             Set-Service -Name $Service -StartupType Disabled -ErrorAction Stop
-            Write-Host "Successfully stopped and disabled service: $Service" -ForegroundColor Green
+            Write-Host "Successfully disabled service: $Service" -ForegroundColor Green
         }
         catch {
-            Write-Warning "Failed to fully disable service: $Service"
+            Write-Warning "Failed to stop/disable service: $Service"
         }
-    }
-    else {
-        Write-Host "Service not present (already removed or skipped): $Service" -ForegroundColor DarkGray
     }
 }
 
-# 2. DEFINE PACKAGES AND PROGRAMS TO UNINSTALL
-$UninstallPackages = @(
-    "AD2F1837.HPJumpStarts", "AD2F1837.HPPCHardwareDiagnosticsWindows",
-    "AD2F1837.HPPowerManager", "AD2F1837.HPPrivacySettings",
-    "AD2F1837.HPSupportAssistant", "AD2F1837.HPSureShieldAI",
-    "AD2F1837.HPSystemInformation", "AD2F1837.HPQuickDrop",
-    "AD2F1837.HPWorkWell", "AD2F1837.myHP",
-    "AD2F1837.HPDesktopSupportUtilities", "AD2F1837.HPQuickTouch",
-    "AD2F1837.HPEasyClean"
-)
+# 2. DELETE HP AUTO-UPDATE & RECOVERY SCHEDULED TASKS
+Write-Host "`n--- Purging HP Scheduled Watchdog Tasks ---" -ForegroundColor Cyan
+$HPTasks = Get-ScheduledTask -TaskPath "\HP*" -ErrorAction SilentlyContinue
+if ($HPTasks) {
+    foreach ($Task in $HPTasks) {
+        Unregister-ScheduledTask -TaskName $Task.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "Deleted Task: $($Task.TaskName)" -ForegroundColor Green
+    }
+}
 
+# 3. FORCE DIRECT UNINSTALL OF HP CONNECTION OPTIMIZER (Using uncovered path)
+Write-Host "`n--- Target: HP Connection Optimizer ---" -ForegroundColor Cyan
+try {
+    (Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -like "*Connection Optimizer*" }).Uninstall()
+    Write-Host "Successfully forced out HP Connection Optimizer via WMI." -ForegroundColor Green
+}
+catch {
+    Write-Warning "WMI method skipped or failed for Connection Optimizer. Moving to registry hooks..."
+}
+
+# 4. REMOVE RESIDUAL EXTENSION APPLICATIONS & COMPATIBILITY ADDONS
 $UninstallPrograms = @(
-    "HP Client Security Manager", "HP Connection Optimizer", "HP Documentation",
-    "HP MAC Address Manager", "HP Notifications", "HP Security Update Service",
-    "HP System Default Settings", "HP Sure Click", "HP Sure Click Security Browser",
-    "HP Sure Run", "HP Sure Recover", "HP Sure Sense", "HP Sure Sense Installer",
-    "HP Wolf Security", "HP Wolf Security Application Support for Sure Sense",
-    "HP Wolf Security Application Support for Windows", "HP Network Optimizer"
+    "Poly Camera Pro Compatibility Add-on",
+    "HP Wolf Security Application Support for Credential Protection AI Support",
+    "HP Wolf Security Application Support for Chrome 148.0.7778.257",
+    "HP Wolf Security - Console",
+    "HP Sure Run Module",
+    "HP Wolf Security",
+    "HP Client Security Manager",
+    "HP Notifications"
 )
 
-$HPidentifier = "AD2F1837"
-
-# Gather installed targets
-$InstalledPackages = Get-AppxPackage -AllUsers | Where-Object { ($UninstallPackages -contains $_.Name) -or ($_.Name -match "^$HPidentifier") }
-$ProvisionedPackages = Get-AppxProvisionedPackage -Online | Where-Object { ($UninstallPackages -contains $_.DisplayName) -or ($_.DisplayName -match "^$HPidentifier") }
-$InstalledPrograms = Get-Package | Where-Object { $UninstallPrograms -contains $_.Name }
-
-# 3. REMOVE APPX PROVISIONED PACKAGES
-Write-Host "`n--- Removing Provisioned Windows Apps ---" -ForegroundColor Cyan
-foreach ($ProvPackage in $ProvisionedPackages) {
-    Write-Host "Attempting to remove provisioned package: [$($ProvPackage.DisplayName)]..."
-    try {
-        $Null = Remove-AppxProvisionedPackage -PackageName $ProvPackage.PackageName -Online -ErrorAction Stop
-        Write-Host "Successfully removed provisioned package: [$($ProvPackage.DisplayName)]" -ForegroundColor Green
-    }
-    catch { 
-        Write-Warning "Failed to remove provisioned package: [$($ProvPackage.DisplayName)]" 
-    }
-}
-
-# 4. REMOVE APPX PACKAGES
-Write-Host "`n--- Removing User-Installed Windows Apps ---" -ForegroundColor Cyan
-foreach ($AppxPackage in $InstalledPackages) {
-    Write-Host "Attempting to remove Appx package: [$($AppxPackage.Name)]..."
-    try {
-        $Null = Remove-AppxPackage -Package $AppxPackage.PackageFullName -AllUsers -ErrorAction Stop
-        Write-Host "Successfully removed Appx package: [$($AppxPackage.Name)]" -ForegroundColor Green
-    }
-    catch { 
-        Write-Warning "Failed to remove Appx package: [$($AppxPackage.Name)]" 
-    }
-}
-
-# 5. REMOVE INSTALLED PROGRAMS
-Write-Host "`n--- Uninstalling Desktop Applications ---" -ForegroundColor Cyan
-if ($InstalledPrograms) {
-    foreach ($Program in $InstalledPrograms) {
-        Write-Host "Attempting to uninstall application: [$($Program.Name)]..."
+Write-Host "`n--- Sequentially Uninstalling Dependent HP Modules ---" -ForegroundColor Cyan
+foreach ($ProgramName in $UninstallPrograms) {
+    $Program = Get-Package | Where-Object { $_.Name -eq $ProgramName }
+    if ($Program) {
         try {
-            $Null = $Program | Uninstall-Package -AllVersions -Force -ErrorAction Stop
-            Write-Host "Successfully uninstalled app: [$($Program.Name)]" -ForegroundColor Green
+            $Program | Uninstall-Package -AllVersions -Force -ErrorAction Stop
+            Write-Host "Successfully uninstalled app: $ProgramName" -ForegroundColor Green
         }
-        catch { 
-            Write-Warning "Failed to uninstall app: [$($Program.Name)]" 
+        catch {
+            Write-Warning "Standard uninstaller failed for $ProgramName."
         }
     }
 }
 
-# 6. FALLBACK MSIs (HP WOLF SECURITY FORCE REMOVAL)
-Write-Host "`n--- Running MSI Force Uninstalls ---" -ForegroundColor Cyan
-$MSIGuids = @("{0E2E04B0-9EDD-11EB-B38C-10604B96B11E}", "{4DA839F0-72CF-11EC-B247-3863BB3CB5A8}")
-foreach ($Guid in $MSIGuids) {
-    try {
-        Start-Process msiexec.exe -ArgumentList "/x $Guid /qn /norestart" -Wait -NoNewWindow
-        Write-Host "MSI uninstall payload executed for $Guid" -ForegroundColor Green
-    }
-    catch {
-        Write-Warning "MSI execution failed for $Guid"
-    }
+# 5. FORCE DIRECT COMMAND LINE DELETION FOR HP DOCUMENTATION
+Write-Host "`n--- Target: HP Documentation ---" -ForegroundColor Cyan
+if (Test-Path "C:\Program Files\HP\Documentation\Doc_Uninstall.cmd") {
+    Start-Process -FilePath "CMD.exe" -ArgumentList '/C "C:\Program Files\HP\Documentation\Doc_Uninstall.cmd"' -Wait -NoNewWindow
+    Write-Host "HP Documentation native uninstaller executed." -ForegroundColor Green
 }
+
+# 6. EXECUTE TARGETED MSI FORCE-REMOVALS USING AUDITED GUIDS
+# Wiping the exact instances found on her laptop, ensuring Security Update Service gets lost.
+Write-Host "`n--- Target: Specific MSI Application Closures ---" -ForegroundColor Cyan
+$ExactMsiGuids = @(
+    "{94E01662-DDD0-47EF-89C5-3546611AD22B}", # Her Specific HP Security Update Service GUID
+    "{558000B1-3B4B-4784-A516-58EBF3560B78}", # Poly Camera Pro Compatibility Add-on
+    "{DD8282FC-4F27-45D9-98AC-7CDC501B1FC8}", # Credential Protection AI Support Component
+    "{F7D3BC62-650B-40E0-A7EB-53F27DF56F06}", # Wolf Chrome Extension Framework
+    "{0E2E04B0-9EDD-11EB-B38C-10604B96B11E}", # Wolf Security Core
+    "{4DA839F0-72CF-11EC-B247-3863BB3CB5A8}"  # Wolf Security Support Platform
+)
+
+foreach ($Guid in $ExactMsiGuids) {
+    Write-Host "Force purging deployment GUID from configuration matrix: $Guid" -ForegroundColor Yellow
+    Start-Process msiexec.exe -ArgumentList "/x $Guid /qn /norestart" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+}
+
+# 7. CLEAN UP RESIDUAL UWP FRAMEWORKS
+$HPidentifier = "AD2F1837"
+Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -match "^$HPidentifier" } | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
+Get-AppxPackage -AllUsers | Where-Object { $_.Name -match "^$HPidentifier" } | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
 
 Write-Host "`n=======================================================" -ForegroundColor Cyan
-Write-Host "Optimization Complete. Reboot her machine to finalize." -ForegroundColor Green
+Write-Host "Purge Complete! Execute a system restart to release network hooks." -ForegroundColor Green
 Write-Host "=======================================================" -ForegroundColor Cyan
